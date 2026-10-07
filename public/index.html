@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>束流保护演练台</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; margin: 0; background: #f4f6f8; color: #1c2733; }
+  header { background: #123a5c; color: #fff; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: .85; }
+  main { max-width: 1080px; margin: 0 auto; padding: 16px; }
+  section { background: #fff; border: 1px solid #dde3ea; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: #123a5c; }
+  h3 { font-size: 13px; margin: 16px 0 8px; color: #40566d; }
+  label { display: inline-flex; flex-direction: column; font-size: 12px; color: #40566d; margin: 0 12px 8px 0; }
+  input, select { padding: 6px 8px; border: 1px solid #b9c4cf; border-radius: 4px; font-size: 14px; min-width: 140px; }
+  button { padding: 7px 16px; border: 0; border-radius: 4px; background: #1668b0; color: #fff; font-size: 14px; cursor: pointer; }
+  button:hover { background: #0f5289; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #dde3ea; padding: 6px 8px; text-align: left; }
+  th { background: #eef2f6; }
+  .water { font-size: 22px; font-weight: 700; color: #123a5c; }
+  .msg { padding: 8px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 16px; display: none; white-space: pre-wrap; }
+  .msg.ok { display: block; background: #e6f6e9; color: #1d6b31; border: 1px solid #b7e3c0; }
+  .msg.err { display: block; background: #fdecea; color: #a02c22; border: 1px solid #f5c6c0; }
+  .verdict-ACCEPT { color: #1d6b31; font-weight: 600; }
+  .verdict-REJECT { color: #a02c22; font-weight: 600; }
+  .muted { color: #7a8a99; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: baseline; }
+</style>
+</head>
+<body>
+<header>
+  <h1>束流保护演练台</h1>
+  <p>阈值规程按整数采样序号生效；系统仅从序号 0 起按连续顺序裁决，缺口补齐后依序排空，已裁决结果不可变、不重算。</p>
+</header>
+<main>
+  <section>
+    <h2>1. 创建演练</h2>
+    <label>演练名称<input id="create-name" placeholder="例如：夜班阈值切换演练"></label>
+    <label>基础阈值<input id="create-threshold" type="number" step="any" value="100"></label>
+    <button id="create-btn">创建演练</button>
+  </section>
+
+  <section>
+    <h2>2. 选择演练</h2>
+    <div class="row">
+      <select id="drill-select"></select>
+      <button id="refresh-btn">刷新列表</button>
+      <span id="drill-meta" class="muted"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 登记新规程</h2>
+    <label>生效序号<input id="proto-seq" type="number" step="1" min="0" placeholder="整数序号"></label>
+    <label>新阈值<input id="proto-threshold" type="number" step="any" placeholder="新阈值"></label>
+    <button id="proto-btn">登记规程</button>
+    <div class="muted" style="font-size:12px">生效序号不得低于当前水位；历史裁决不会重算。</div>
+  </section>
+
+  <section>
+    <h2>4. 投递观测</h2>
+    <label>投递标识<input id="obs-delivery" placeholder="稳定标识，如 run-42-seq-2"></label>
+    <label>序号<input id="obs-seq" type="number" step="1" min="0"></label>
+    <label>读数<input id="obs-reading" type="number" step="any"></label>
+    <button id="obs-btn">投递观测</button>
+    <div class="muted" style="font-size:12px">相同标识与内容的重传将回显原裁决；同标识改内容、同序号不同内容会被拒绝。</div>
+  </section>
+
+  <div id="msg" class="msg"></div>
+
+  <section id="status" hidden>
+    <h2>演练状态</h2>
+    <div class="row">
+      <div>连续水位（下一期望序号）：<span class="water" id="water">0</span></div>
+      <div class="muted" id="water-explain"></div>
+    </div>
+
+    <h3>规程表</h3>
+    <table>
+      <thead><tr><th>版本</th><th>生效序号</th><th>阈值</th><th>登记时间</th></tr></thead>
+      <tbody id="protocols-body"></tbody>
+    </table>
+
+    <h3>等待队列（较早序号缺失，持久等待）</h3>
+    <table>
+      <thead><tr><th>序号</th><th>投递标识</th><th>读数</th><th>到达时间</th></tr></thead>
+      <tbody id="waiting-body"></tbody>
+    </table>
+
+    <h3>裁决记录（每个序号仅一份，不可变）</h3>
+    <table>
+      <thead><tr><th>序号</th><th>投递标识</th><th>读数</th><th>实际采用规程</th><th>阈值</th><th>裁决</th><th>首个拒因</th><th>裁决时间</th></tr></thead>
+      <tbody id="adjudicated-body"></tbody>
+    </table>
+  </section>
+</main>
+<script>
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+let selectedDrill = null;
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { 'content-type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const e = data.error || {};
+    throw new Error(`${res.status} ${e.code || 'ERROR'}: ${e.message || res.statusText}`);
+  }
+  return data;
+}
+
+function showMsg(text, isError) {
+  const el = $('msg');
+  el.textContent = text;
+  el.className = 'msg ' + (isError ? 'err' : 'ok');
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function loadDrills(keepSelection) {
+  const drills = await api('GET', '/api/drills');
+  const sel = $('drill-select');
+  sel.innerHTML = '';
+  if (drills.length === 0) {
+    sel.innerHTML = '<option value="">（尚无演练，请先创建）</option>';
+    selectedDrill = null;
+    renderStatus(null);
+    return;
+  }
+  for (const d of drills) {
+    const opt = document.createElement('option');
+    opt.value = d.id;
+    opt.textContent = `${d.name}（${d.id}，水位 ${d.waterLevel}）`;
+    sel.appendChild(opt);
+  }
+  if (keepSelection && selectedDrill && drills.some((d) => d.id === selectedDrill)) {
+    sel.value = selectedDrill;
+  } else {
+    selectedDrill = drills[0].id;
+    sel.value = selectedDrill;
+  }
+  await renderStatus();
+}
+
+async function renderStatus() {
+  if (!selectedDrill) { $('status').hidden = true; return; }
+  const d = await api('GET', `/api/drills/${selectedDrill}`);
+  $('status').hidden = false;
+  $('drill-meta').textContent = `创建于 ${d.createdAt}`;
+  $('water').textContent = d.waterLevel;
+  $('water-explain').textContent = d.waterLevel === 0
+    ? '尚无任何序号被裁决，系统等待序号 0'
+    : `序号 0 至 ${d.waterLevel - 1} 已依序裁决，等待序号 ${d.waterLevel}`;
+
+  $('protocols-body').innerHTML = d.protocols.map((p) =>
+    `<tr><td>v${p.version}</td><td>${p.effectiveSeq}</td><td>${p.threshold}</td><td>${esc(p.registeredAt)}</td></tr>`).join('');
+
+  $('waiting-body').innerHTML = d.waiting.length === 0
+    ? '<tr><td colspan="4" class="muted">（空）</td></tr>'
+    : d.waiting.map((w) =>
+        `<tr><td>${w.seq}</td><td>${esc(w.deliveryId)}</td><td>${w.reading}</td><td>${esc(w.receivedAt)}</td></tr>`).join('');
+
+  $('adjudicated-body').innerHTML = d.adjudicated.length === 0
+    ? '<tr><td colspan="8" class="muted">（空）</td></tr>'
+    : d.adjudicated.map((a) =>
+        `<tr><td>${a.seq}</td><td>${esc(a.deliveryId)}</td><td>${a.reading}</td>` +
+        `<td>v${a.protocolVersion}</td><td>${a.threshold}</td>` +
+        `<td class="verdict-${a.verdict}">${a.verdict === 'ACCEPT' ? '通过' : '拒绝'}</td>` +
+        `<td>${a.rejectReason ? esc(a.rejectReason) : '—'}</td><td>${esc(a.adjudicatedAt)}</td></tr>`).join('');
+}
+
+$('create-btn').onclick = async () => {
+  try {
+    const name = $('create-name').value.trim();
+    const baseThreshold = Number($('create-threshold').value);
+    const d = await api('POST', '/api/drills', { name, baseThreshold });
+    selectedDrill = d.id;
+    showMsg(`演练已创建：${d.id}`, false);
+    await loadDrills(true);
+  } catch (e) { showMsg(e.message, true); }
+};
+
+$('refresh-btn').onclick = () => loadDrills(true).catch((e) => showMsg(e.message, true));
+$('drill-select').onchange = (e) => { selectedDrill = e.target.value; renderStatus().catch(() => {}); };
+
+$('proto-btn').onclick = async () => {
+  if (!selectedDrill) return showMsg('请先选择演练', true);
+  try {
+    const effectiveSeq = Number($('proto-seq').value);
+    const threshold = Number($('proto-threshold').value);
+    const r = await api('POST', `/api/drills/${selectedDrill}/protocols`, { effectiveSeq, threshold });
+    showMsg(`规程 v${r.protocol.version} 已登记，自序号 ${r.protocol.effectiveSeq} 起生效`, false);
+    await renderStatus();
+  } catch (e) { showMsg(e.message, true); }
+};
+
+$('obs-btn').onclick = async () => {
+  if (!selectedDrill) return showMsg('请先选择演练', true);
+  try {
+    const deliveryId = $('obs-delivery').value.trim();
+    const seq = Number($('obs-seq').value);
+    const reading = Number($('obs-reading').value);
+    const r = await api('POST', `/api/drills/${selectedDrill}/observations`, { deliveryId, seq, reading });
+    const verdict = r.adjudication
+      ? `，裁决 ${r.adjudication.verdict === 'ACCEPT' ? '通过' : '拒绝'}（规程 v${r.adjudication.protocolVersion}）`
+      : '，进入等待队列';
+    showMsg(`序号 ${r.seq}：${r.status === 'WAITING' ? '等待中' : '已裁决'}${r.replayed ? '（重传回显）' : ''}${verdict}，当前水位 ${r.waterLevel}`, false);
+    await renderStatus();
+  } catch (e) { showMsg(e.message, true); }
+};
+
+loadDrills(false).catch((e) => showMsg(e.message, true));
+setInterval(() => { if (selectedDrill) renderStatus().catch(() => {}); }, 2000);
+</script>
+</body>
+</html>

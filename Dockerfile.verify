@@ -1,0 +1,14 @@
+# Verify service: runs the build check, the state-machine tests, and the
+# HTTP smoke test against the app service, then exits with the result.
+FROM node:20-alpine
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+COPY package.json ./
+COPY src ./src
+COPY test ./test
+COPY verify ./verify
+COPY scripts ./scripts
+
+CMD ["sh", "scripts/verify.sh"]

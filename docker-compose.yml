@@ -1,0 +1,42 @@
+name: beamguard
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    image: beamguard-app
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      DATA_DIR: /data
+      # Test-only crash hook so the verify flow can force real restarts.
+      ENABLE_CRASH_ENDPOINT: "1"
+    volumes:
+      - beamguard-data:/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 60
+      start_period: 3s
+
+  # One-shot acceptance: build check + state machine tests + HTTP smoke.
+  # Exits on its own; the exit code reports the acceptance result:
+  #   docker compose up --build --exit-code-from verify
+  verify:
+    build:
+      context: .
+      dockerfile: Dockerfile.verify
+    image: beamguard-verify
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      APP_ADDR: http://app:8080
+    restart: "no"
+
+volumes:
+  beamguard-data:
