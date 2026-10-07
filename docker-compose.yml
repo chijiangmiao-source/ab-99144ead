@@ -1,0 +1,46 @@
+services:
+  beam-protect:
+    build: .
+    image: beam-protect:latest
+    container_name: beam-protect
+    environment:
+      DB_PATH: /data/beamprotect.db
+      HOST: 0.0.0.0
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    volumes:
+      - beam-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import sys,urllib.request
+          try:
+              r=urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=2)
+              sys.exit(0 if r.status==200 else 1)
+          except Exception:
+              sys.exit(1)
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 3s
+
+  # 一次性验收：构建 → 状态机单测 → 真实 HTTP 冒烟 → 中断重开恢复，
+  # 结束后自行退出，退出码即验收结果（0 通过 / 1 失败）。
+  verify:
+    build: .
+    image: beam-protect:latest
+    command: ["python", "scripts/verify.py"]
+    environment:
+      BASE_URL: http://beam-protect:8080
+    depends_on:
+      beam-protect:
+        condition: service_healthy
+    # 恢复阶段需在容器内拉起并杀掉本地服务进程
+    init: true
+
+volumes:
+  beam-data:

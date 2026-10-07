@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>束流保护阈值规程切换 · 演练值班台</title>
+<style>
+  :root { --bg:#0f1420; --panel:#18203300; --card:#1b2438; --line:#2a3550;
+          --fg:#e6ecf8; --dim:#8d9bb8; --accent:#4f8cff; --ok:#33c27f;
+          --bad:#ff5d6c; --wait:#f5b942; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--fg); }
+  header { padding:18px 28px; border-bottom:1px solid var(--line);
+           display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  header span { color:var(--dim); font-size:12px; }
+  main { display:grid; grid-template-columns:340px 1fr; gap:18px; padding:18px 28px; }
+  @media (max-width:980px){ main{grid-template-columns:1fr;} }
+  .card { background:var(--card); border:1px solid var(--line);
+          border-radius:10px; padding:16px; margin-bottom:16px; }
+  .card h2 { margin:0 0 12px; font-size:14px; color:var(--accent); }
+  label { display:block; font-size:12px; color:var(--dim); margin:8px 0 3px; }
+  input { width:100%; padding:7px 9px; border-radius:6px; border:1px solid var(--line);
+          background:#101626; color:var(--fg); font-size:13px; }
+  button { margin-top:12px; padding:8px 14px; border:0; border-radius:6px;
+           background:var(--accent); color:#fff; font-size:13px; cursor:pointer; }
+  button:hover { filter:brightness(1.1); }
+  button.ghost { background:#283450; }
+  .row { display:flex; gap:8px; }
+  .row input { flex:1; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; }
+  .pill.PASS { background:rgba(51,194,127,.16); color:var(--ok); }
+  .pill.INHIBIT { background:rgba(255,93,108,.16); color:var(--bad); }
+  .pill.WAITING { background:rgba(245,185,66,.16); color:var(--wait); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:600; font-size:12px; }
+  .stat { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:12px; }
+  .stat div b { font-size:22px; display:block; }
+  .stat div span { color:var(--dim); font-size:12px; }
+  pre { background:#0c1120; border:1px solid var(--line); border-radius:8px;
+        padding:10px; white-space:pre-wrap; word-break:break-all;
+        max-height:180px; overflow:auto; font-size:12px; }
+  .muted { color:var(--dim); }
+  .rej { color:var(--bad); font-size:12px; }
+  select { width:100%; padding:7px 9px; border-radius:6px; background:#101626;
+           color:var(--fg); border:1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1>束流保护 · 阈值规程切换演练值班台</h1>
+  <span>序号自 0 起连续裁决 · 缺号持久化等待 · 历史裁决不可变</span>
+</header>
+<main>
+  <section>
+    <div class="card">
+      <h2>1 · 创建演练</h2>
+      <label>演练 ID</label><input id="d-id" value="drill-demo">
+      <label>名称</label><input id="d-name" value="班组演练">
+      <label>基线规程代码</label><input id="d-code" value="P-BASE">
+      <label>基线阈值</label><input id="d-thr" type="number" step="0.1" value="10">
+      <button onclick="createDrill()">创建演练</button>
+    </div>
+    <div class="card">
+      <h2>2 · 登记新规程</h2>
+      <label>生效序号（含）</label><input id="p-from" type="number" min="1" value="2">
+      <label>规程代码</label><input id="p-code" value="P-TIGHT">
+      <label>阈值</label><input id="p-thr" type="number" step="0.1" value="5">
+      <button onclick="registerProc()">登记规程</button>
+    </div>
+    <div class="card">
+      <h2>3 · 投递观测</h2>
+      <label>稳定投递标识</label><input id="o-deliv" value="obs-0">
+      <label>采样序号（≥0 整数）</label><input id="o-seq" type="number" min="0" value="0">
+      <label>读数</label><input id="o-read" type="number" step="0.1" value="9">
+      <button onclick="submitObs()">投递</button>
+    </div>
+    <div class="card">
+      <h2>最近响应</h2>
+      <pre id="output" class="muted">（尚无请求）</pre>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2>演练</h2>
+      <div class="row">
+        <select id="drill-select" onchange="load()"></select>
+        <button class="ghost" onclick="listDrills()">刷新列表</button>
+        <button class="ghost" onclick="load()">查看状态</button>
+      </div>
+      <div class="stat" style="margin-top:14px">
+        <div><b id="s-level">-</b><span>连续水位（下一期待序号）</span></div>
+        <div><b id="s-verdicts">-</b><span>已裁决序号数</span></div>
+        <div><b id="s-waiting">-</b><span>等待队列长度</span></div>
+      </div>
+      <div id="s-firstrej" class="rej"></div>
+    </div>
+
+    <div class="card">
+      <h2>规程登记</h2>
+      <table><thead><tr><th>生效序号</th><th>规程代码</th><th>阈值</th></tr></thead>
+      <tbody id="t-procs"></tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>等待队列（较早序号缺失，水位不动）</h2>
+      <table><thead><tr><th>序号</th><th>投递标识</th><th>读数</th><th>到达时间</th></tr></thead>
+      <tbody id="t-waiting"></tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>各序号裁决（不可变）</h2>
+      <table><thead><tr>
+        <th>序号</th><th>投递标识</th><th>读数</th><th>裁决</th>
+        <th>实际规程</th><th>阈值</th><th>拒因</th><th>裁决时间</th>
+      </tr></thead><tbody id="t-verdicts"></tbody></table>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentId = null;
+
+async function api(method, path, body) {
+  const opt = { method, headers: { "Accept": "application/json" } };
+  if (body !== undefined) {
+    opt.headers["Content-Type"] = "application/json";
+    opt.body = JSON.stringify(body);
+  }
+  const resp = await fetch(path, opt);
+  let data = null;
+  try { data = await resp.json(); } catch (_) {}
+  return { status: resp.status, data };
+}
+function show(x) { $("output").textContent = JSON.stringify(x, null, 2); }
+
+async function createDrill() {
+  const r = await api("POST", "/api/drills", {
+    drill_id: $("d-id").value.trim(),
+    name: $("d-name").value.trim(),
+    base_procedure_code: $("d-code").value.trim(),
+    base_threshold: parseFloat($("d-thr").value),
+  });
+  show(r);
+  if (r.status === 201) { currentId = r.data.drill_id; await listDrills(); await load(); }
+}
+async function registerProc() {
+  const id = currentId || $("d-id").value.trim();
+  const r = await api("POST", `/api/drills/${id}/procedures`, {
+    effective_from: parseInt($("p-from").value, 10),
+    code: $("p-code").value.trim(),
+    threshold: parseFloat($("p-thr").value),
+  });
+  show(r);
+  if (r.status === 201) await load();
+}
+async function submitObs() {
+  const id = currentId || $("d-id").value.trim();
+  const r = await api("POST", `/api/drills/${id}/observations`, {
+    delivery_id: $("o-deliv").value.trim(),
+    seq: parseInt($("o-seq").value, 10),
+    reading: parseFloat($("o-read").value),
+  });
+  show(r);
+  await load();
+}
+async function listDrills() {
+  const r = await api("GET", "/api/drills");
+  const sel = $("drill-select");
+  sel.innerHTML = "";
+  for (const d of (r.data.drills || [])) {
+    const o = document.createElement("option");
+    o.value = d.drill_id;
+    o.textContent = `${d.drill_id}（${d.name}，水位 ${d.level}）`;
+    sel.appendChild(o);
+  }
+  if (currentId) sel.value = currentId;
+  if (!currentId && sel.options.length) currentId = sel.value;
+}
+$("drill-select").addEventListener("change", (e) => { currentId = e.target.value; load(); });
+
+function esc(s){ return String(s ?? "").replace(/[&<>]/g, c =>
+  ({ "&":"&amp;","<":"&lt;",">":"&gt;" }[c])); }
+
+async function load() {
+  const id = $("drill-select").value;
+  if (!id) return;
+  currentId = id;
+  const r = await api("GET", `/api/drills/${id}`);
+  if (r.status !== 200) { show(r); return; }
+  const s = r.data;
+  $("s-level").textContent = s.water_level;
+  $("s-verdicts").textContent = s.verdicts.length;
+  $("s-waiting").textContent = s.waiting.length;
+  $("s-firstrej").textContent = s.first_rejection
+    ? `首个拒因：${s.first_rejection.kind} — ${s.first_rejection.reason}` : "";
+  $("t-procs").innerHTML = s.procedures.map(p =>
+    `<tr><td>${p.effective_from}</td><td>${esc(p.code)}</td><td>${p.threshold}</td></tr>`
+  ).join("") || `<tr><td colspan="3" class="muted">无</td></tr>`;
+  $("t-waiting").innerHTML = s.waiting.map(w =>
+    `<tr><td>${w.seq}</td><td>${esc(w.delivery_id)}</td><td>${w.reading}</td>
+     <td class="muted">${esc(w.received_at)}</td></tr>`
+  ).join("") || `<tr><td colspan="4" class="muted">空（无缺口）</td></tr>`;
+  $("t-verdicts").innerHTML = s.verdicts.map(v =>
+    `<tr><td>${v.seq}</td><td>${esc(v.delivery_id)}</td><td>${v.reading}</td>
+     <td><span class="pill ${v.decision}">${v.decision}</span></td>
+     <td>${esc(v.procedure_code)}</td><td>${v.threshold}</td>
+     <td class="rej">${esc(v.reason || "")}</td>
+     <td class="muted">${esc(v.adjudicated_at)}</td></tr>`
+  ).join("") || `<tr><td colspan="8" class="muted">尚无裁决</td></tr>`;
+}
+(async function init(){ await listDrills(); await load(); setInterval(load, 5000); })();
+</script>
+</body>
+</html>
